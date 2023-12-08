@@ -1,0 +1,161 @@
+variables:
+  # docker
+  REGISTRY: ""
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  
+  # service
+  SERVICE_NAME: "admin-ui-ewallet"
+  IMAGE_VER: "tag_version"
+  NAMESPACE: ""
+
+stages:
+  - check
+  - build
+  - deploy
+  
+sonarqube-cli-check:
+  stage: check
+  image:
+    name: sonarsource/sonar-scanner-cli:latest
+    entrypoint: [""]
+  script:
+    - cat /opt/sonar-scanner/conf/sonar-scanner.properties
+    - sonar-scanner -Dsonar.qualitygate.wait=true -Dsonar.projectKey=dev-sbreport-ui #-Dsonar.sources=src/main/java/ -Dsonar.language=java -Dsonar.java.binaries=. 
+
+  allow_failure: true 
+  only:
+    - merge_requests
+    - test-cicd
+    - dev
+  tags:
+    - uat
+
+# push image to regsitry server  
+build-dev:
+  stage: build
+  image: node:16.20
+  script:
+    #- . /opt/gitlab-runner/cache/pre-variable
+    - node -v; yarn version; ls -al
+    - npm config list
+    - yarn config set https-proxy http://10.101.243.32:8080
+    - yarn config set cache-folder /opt/gitlab-runner/cache/yarn/
+    - yarn install
+    - yarn run build
+    - ls -al; ls -al node_modules; ls -al dist
+  #rules:
+    #- changes:
+      #- package.json
+  # Cache modules in between jobs
+  cache:
+    key: $CI_COMMIT_REF_SLUG
+    paths:
+      - dist/
+  only:
+     - develop
+     #- cicd-dev
+  #when: manual
+
+  tags:
+    - utilities-docker
+
+   
+
+deploy-dev:
+  stage: deploy
+  image: alpine-vetc:latest
+  #pull_policy: if-not-present
+  script:
+    - . /opt/gitlab-runner/cache/pre-variable
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add - > /dev/null
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    #- TIME=`date +%Y%m%d-%H%M`; ssh $SSH_OPTIONS $USERNAME@$HOST "ls -alh $FOLDER;cp ${FOLDER}/${SERVICE_NAME}.jar $FOLDER/backup/${SERVICE_NAME}.jar.${TIME}"
+    - ssh $SSH_OPTIONS $USERNAME@$HOST "ls -alh $FOLDER;rm -rf $FOLDER/*"
+    - scp $SSH_OPTIONS -r dist/* $USERNAME@$HOST:$FOLDER/
+    #- rsync -a --delete build/ $USERNAME@$HOST:$FOLDER/
+    - ssh $SSH_OPTIONS $USERNAME@$HOST "ls -alh $FOLDER;netstat -ant | grep LISTEN"
+    #- scp -oKexAlgorithms=diffie-hellman-group1-sha1 -c aes256-cbc -o StrictHostKeyChecking=no test.txt admin_vetc@10.101.243.31:$FOLDER
+  
+  only:
+    - develop
+    #- cicd-dev
+    
+  tags:
+    - utilities-docker
+
+  cache:
+    key: $CI_COMMIT_REF_SLUG
+    paths:
+      - dist/
+    policy: pull
+  #when: manual
+   
+build-uat:
+  stage: build
+  image: node:16.20
+  script:
+    #- . /opt/gitlab-runner/cache/pre-variable
+    - node -v; yarn version; ls -al
+    #- npm config list
+    - yarn config set https-proxy http://10.101.242.46:8080
+    - yarn config list
+    #- yarn add wrappy --verbose
+    #- . /opt/gitlab-runner/cache/pre-variable
+    - yarn config set cache-folder /opt/gitlab-runner/cache/yarn/
+    #- yarn install --verbose  #--cache-folder=/opt/gitlab-runner/cache/yarn/ #--verbose
+    #- pwd;ls -al /opt/gitlab-runner/cache/yarn/;mkdir node_modules;date;cp -r /opt/gitlab-runner/cache/yarn/v6/* node_modules/;date
+    - yarn install
+    - yarn run build
+    
+  #rules:
+    #- changes:
+      #- package.json
+  # Cache modules in between jobs 
+  cache:
+    key: $CI_COMMIT_REF_SLUG
+    paths:
+      - dist/
+  only:
+     - uat 
+     - release_uat
+     - cicd-uat
+     
+  #when: manual
+  tags:
+    - uat
+    
+
+deploy-uat:
+  stage: deploy
+  image: alpine-vetc:latest
+  #pull_policy: if-not-present
+  script:
+    - . /opt/gitlab-runner/cache/pre-variable
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add - > /dev/null
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    #- TIME=`date +%Y%m%d-%H%M`; ssh $SSH_OPTIONS $USERNAME@$HOST "ls -alh $FOLDER;cp ${FOLDER}/${SERVICE_NAME}.jar $FOLDER/backup/${SERVICE_NAME}.jar.${TIME}"
+    - scp $SSH_OPTIONS -r dist/* ${USERNAME}@${UAT_HOST}:$FOLDER/
+    - ssh $SSH_OPTIONS ${USERNAME}@$UAT_HOST "ls -alh ${FOLDER};uname -a;ip a;netstat -ant | grep LISTEN"
+    #- scp -oKexAlgorithms=diffie-hellman-group1-sha1 -c aes256-cbc -o StrictHostKeyChecking=no test.txt admin_vetc@10.101.243.31:$FOLDER
+  
+  only:
+    - uat
+    - release_uat
+    - cicd-uat
+    
+  cache:
+    key: $CI_COMMIT_REF_SLUG
+    paths:
+      - dist/
+    policy: pull
+  #when: manual
+  tags:
+    - uat
+
+
+
